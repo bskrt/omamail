@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtTest 1.3
 import qs.Commons
+import qs.Commons as Commons
 import "../../components" as Mail
 import "../.." as Omamail
 import "../../account/Accounts.js" as Accounts
@@ -71,10 +72,10 @@ Item {
     id: gmailPage
     width: 600
     service: gmailService
-    textColor: Color.foreground
-    dimColor: Color.foreground
-    dangerColor: Color.accent
-    accentColor: Color.accent
+    textColor: Commons.Color.foreground
+    dimColor: Commons.Color.foreground
+    dangerColor: Commons.Color.accent
+    accentColor: Commons.Color.accent
     panelFontFamily: "monospace"
   }
 
@@ -93,10 +94,10 @@ Item {
     id: page
     width: 600
     service: fakeService
-    textColor: Color.foreground
-    dimColor: Color.foreground
-    dangerColor: Color.accent
-    accentColor: Color.accent
+    textColor: Commons.Color.foreground
+    dimColor: Commons.Color.foreground
+    dangerColor: Commons.Color.accent
+    accentColor: Commons.Color.accent
     panelFontFamily: "monospace"
   }
 
