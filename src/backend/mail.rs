@@ -644,6 +644,61 @@ mod tests {
         assert_eq!(edited[0]["displayName"], "Jane Bcc: x@example.org Example", "one header line, as the UI stores it");
     }
 
+    #[test]
+    fn configured_sender_names_cannot_change_the_mime_envelope() {
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        use mailparse::MailHeaderMap;
+        for provider in [crate::mail::Provider::Imap, crate::mail::Provider::Outlook] {
+            for name in [
+                "Jane\r\nBcc: attacker@example.org", "Jane\rBcc: attacker@example.org",
+                "Jane\nBcc: attacker@example.org", "Jane\0Bcc: attacker@example.org",
+                "Jane\tExample\u{7f}", "田中 太郎", "Jane \"Quoted\" \\ Example",
+                "Jane\r\n", "Jane\n", "Jane\0",
+            ] {
+                let rows = configured_identities(&json!({"email":"me@example.org","senderName":name,
+                    "imap":{"aliases":[{"email":"alias@example.org","displayName":"Alias \"名\" \\","isDefault":false}]}})).unwrap();
+                for from in ["me@example.org", "alias@example.org"] {
+                    let request = crate::mail::SendRequest {
+                        account: crate::mail::Account { id: format!("{}:me@example.org", provider.id()), provider },
+                        from: from.into(), to: vec!["recipient@example.org".into()], cc: vec![], bcc: vec![],
+                        subject: "Synthetic preview".into(), body: "Line one\nLine two\n".into(),
+                        attachments: vec![], execute: false, send_id: None,
+                    };
+                    let prepared = crate::mail::send::prepare(&request, &rows).unwrap();
+                    assert_eq!(prepared.preview()["executed"], false);
+                    assert_eq!(prepared.preview()["to"], json!(["recipient@example.org"]));
+                    let payload = prepared.payload(0, "synthetic-name-boundary").unwrap();
+                    let bytes = URL_SAFE_NO_PAD.decode(payload["raw"].as_str().unwrap()).unwrap();
+                    let parsed = mailparse::parse_mail(&bytes).unwrap();
+                    assert_eq!(parsed.headers.get_all_values("From").len(), 1, "{provider:?}: {name:?}");
+                    assert_eq!(parsed.headers.get_all_values("To"), ["recipient@example.org"]);
+                    assert!(parsed.headers.get_all_values("Bcc").is_empty(), "{name:?}");
+                    assert!(parsed.headers.get_all_values("Cc").is_empty());
+                    let addresses = mailparse::addrparse(&parsed.headers.get_first_value("From").unwrap()).unwrap();
+                    assert_eq!(addresses.len(), 1);
+                    match &addresses[0] {
+                        mailparse::MailAddr::Single(address) => assert_eq!(address.addr, from),
+                        _ => panic!("sender name created a group"),
+                    }
+                    assert_eq!(parsed.get_body().unwrap(), "Line one\nLine two\n");
+                }
+            }
+            // Aliases keep their own names: malformed alias metadata must be
+            // refused before any payload exists, rather than being cleaned as
+            // though it were the account's primary sender name.
+            for name in ["Alias\r\nBcc: attacker@example.org", "Alias\0", "Alias\n", "=?UTF-8?B?WA==?="] {
+                let rows = configured_identities(&json!({"email":"me@example.org","senderName":"Safe",
+                    "imap":{"aliases":[{"email":"alias@example.org","displayName":name,"isDefault":true}]}})).unwrap();
+                let request = crate::mail::SendRequest {
+                    account: crate::mail::Account { id: format!("{}:me@example.org", provider.id()), provider },
+                    from: "alias@example.org".into(), to: vec!["recipient@example.org".into()], cc: vec![], bcc: vec![],
+                    subject: "Synthetic preview".into(), body: "Body".into(), attachments: vec![], execute: false, send_id: None,
+                };
+                assert!(crate::mail::send::prepare(&request, &rows).is_err(), "{name:?}");
+            }
+        }
+    }
+
     struct ReaderProjectionAdapter {
         opened: Value,
         calls: Arc<Mutex<Vec<String>>>,
